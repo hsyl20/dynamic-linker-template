@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Test (
+  loadTestWorking
   ) where
 
 import System.Posix.DynamicLinker.Template
@@ -31,5 +32,3 @@ $(makeDynamicLinker ''TestMissingDL)-}
 }
 
 $(makeDynamicLinker ''TestOptional)-}
-
-main = putStrLn "Hey!"
