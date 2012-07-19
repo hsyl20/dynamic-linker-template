@@ -40,14 +40,19 @@ makeDL :: Name -> [VarStrictType] -> Q [Dec]
 makeDL s vars = do
   foreigns <- mapM (\ (name,_,ftype) -> makeForeign name ftype) vars
   loader <- makeLoader s $ map (\ (n,_,_) -> n) vars
-  return (foreigns ++ loader)
+  return (loader ++ foreigns)
 
 transformName :: (String -> String) -> Name -> Name
 transformName namer (Name occ f) = Name newName f
   where newName = mkOccName $ namer $ occString occ
+
+transformNameLocal :: (String -> String) -> Name -> Name
+transformNameLocal namer n = Name occ NameS
+  where
+    Name occ _ = transformName namer n
     
 nameMake :: Name -> Name
-nameMake = transformName ("make_" ++) 
+nameMake = transformNameLocal ("make_" ++) 
 
 makeForeign :: Name -> Type -> Q Dec
 makeForeign name typ = do
@@ -78,7 +83,7 @@ makeLoader t ss = do
   where
     symbols = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) ss
     makes = map nameMake ss
-    loadName = transformName ("load" ++) t
+    loadName = transformNameLocal ("load" ++) t
     fields mand = map (\(field@(Name occ _),mk) -> (field, AppE (VarE mk) (AppE mand (LitE $ StringL $ occString occ)))) $ zip ss makes
     libHandle dl mand = RecConE t ((Name (mkOccName "libHandle") NameS, dl) : fields mand)
 
