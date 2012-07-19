@@ -5,7 +5,7 @@ module System.Posix.DynamicLinker.Template (
   ) where
 
 import Language.Haskell.TH.Syntax
-import Control.Monad (liftM, when)
+import Control.Monad (liftM, when, unless)
 import Data.List (nub)
 
 import System.Posix.DynamicLinker
@@ -13,7 +13,7 @@ import Foreign.Ptr
 import Foreign.C.String
 import Data.Traversable(traverse)
 import Data.Map (fromList,lookup)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 
 makeDynamicLinker :: Name -> Q [Dec]
 makeDynamicLinker t = do
@@ -29,7 +29,7 @@ decMakeDynamicLinker t dec = do
                DataD [] _ [] [RecC name cons'] _ -> return (name,cons')
                NewtypeD [] _ [] (RecC name cons') _ -> return (name,cons')
                _ -> fail $ errmsg t
-  when (not $ any (\(Name name _,_,_) -> occString name == "libHandle")  cons) $ qReport True (nolibhandlemsg t)
+  unless (any (\(Name name _,_,_) -> occString name == "libHandle")  cons) $ qReport True (nolibhandlemsg t)
   let cons2 = filter (\(Name name _,_,_) -> occString name /= "libHandle") cons
   decs <- makeDL name cons2
   when (null decs) $ qReport False (nodefmsg t)
@@ -40,7 +40,7 @@ makeDL :: Name -> [VarStrictType] -> Q [Dec]
 makeDL s vars = do
   foreigns <- mapM (\ (name,_,ftype) -> makeForeign name ftype) vars
   loader <- makeLoader s $ map (\ (n,_,_) -> n) vars
-  return $ concat [foreigns,loader]
+  return (foreigns ++ loader)
 
 transformName :: (String -> String) -> Name -> Name
 transformName namer (Name occ f) = Name newName f
@@ -62,13 +62,13 @@ makeLoader t ss = do
       \lib -> do
         dl <- dlopen lib [RTLD_NOW,RTLD_LOCAL]
         let symbls = $(return symbols)
-        let mydlsym = \s -> withCAString s $ c_dlsym (packDL dl)
+        let mydlsym s = withCAString s $ c_dlsym (packDL dl)
         symPtrs <- traverse mydlsym symbls
         let syms = fromList $ symbls `zip` symPtrs
-        let pick = \a -> fmap castFunPtr $ Data.Map.lookup a syms
-        let unsafePick  = \a -> fromMaybe nullFunPtr $ pick a
-        let notFound = \a -> error ("Mandatory symbol \"" ++ a ++ "\" not found in " ++ lib)
-        let mandatory = \a -> if (pick a == Nothing) then notFound a else unsafePick a
+        let pick a = fmap castFunPtr $ Data.Map.lookup a syms
+        let unsafePick a = fromMaybe nullFunPtr $ pick a
+        let notFound a = error ("Mandatory symbol \"" ++ a ++ "\" not found in " ++ lib)
+        let mandatory a = if isNothing (pick a) then notFound a else unsafePick a
         return $ $(fmap libHandle [| dl |])
 
     |]
@@ -76,7 +76,7 @@ makeLoader t ss = do
   return [load]
 
   where
-    symbols = ListE $ map (LitE . StringL) (map (\ (Name occ _) -> occString occ) ss)
+    symbols = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) ss
     makes = map nameMake ss
     loadName = transformName ("load" ++) t
     mand = VarE $ Name (mkOccName "mandatory") NameS
