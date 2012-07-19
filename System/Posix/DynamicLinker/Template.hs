@@ -69,7 +69,7 @@ makeLoader t ss = do
         let unsafePick a = fromMaybe nullFunPtr $ pick a
         let notFound a = error ("Mandatory symbol \"" ++ a ++ "\" not found in " ++ lib)
         let mandatory a = if isNothing (pick a) then notFound a else unsafePick a
-        return $ $(liftM2 libHandle [| dl |] [| mandatory |]) 
+        return $(liftM2 libHandle [| dl |] [| mandatory |]) 
 
     |]
   let load = FunD loadName [Clause [] (NormalB body) []]
@@ -79,7 +79,6 @@ makeLoader t ss = do
     symbols = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) ss
     makes = map nameMake ss
     loadName = transformName ("load" ++) t
-    mand = VarE $ Name (mkOccName "mandatory") NameS
     fields mand = map (\(field@(Name occ _),mk) -> (field, AppE (VarE mk) (AppE mand (LitE $ StringL $ occString occ)))) $ zip ss makes
     libHandle dl mand = RecConE t ((Name (mkOccName "libHandle") NameS, dl) : fields mand)
 
