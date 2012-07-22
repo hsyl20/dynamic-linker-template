@@ -8,7 +8,7 @@ import System.Posix.DynamicLinker.Template
 import Language.Haskell.TH
 
 import Foreign.Ptr
-import System.Posix.DynamicLinker.Prim (DL)
+import System.Posix.DynamicLinker.Prim
 
 data TestWorking = TestWorking {
   libHandle ::DL,
@@ -16,7 +16,10 @@ data TestWorking = TestWorking {
   thing4 :: Float -> Int
 }
 
-$(makeDynamicLinker ''TestWorking)
+myModifier :: Maybe (String -> String)
+myModifier = Just( (++) "_v2" )
+
+$(makeDynamicLinker ''TestWorking CCall 'myModifier)
 
 {-data TestMissingDL = TestMissingDL {
   thing :: Int -> Int -> Int,
