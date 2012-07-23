@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell, CPP #-}
 
 module System.Posix.DynamicLinker.Template (
-  makeDynamicLinker, Callconv(..), DL, FunPtr
+  makeDynamicLinker, Callconv(..), DL, id, FunPtr
   ) where
 
 import Language.Haskell.TH.Syntax
@@ -87,14 +87,8 @@ makeDynamicLinker t callconv symMod = do
             -- Symbol list
             let symbls = $(return symbols)
 
-            -- Modify a given symbol name using the provided function (if any)
-            let modify a = case $(return $ VarE symMod) of {
-                Nothing -> a;
-                Just f -> f a
-              }
-            
             -- Transform symbol names
-            let modSymbols = fmap modify symbls
+            let modSymbols = fmap $(return $ VarE symMod) symbls
 
             -- Load symbols
             let mydlsym s = withCAString s $ c_dlsym (packDL dl)
@@ -115,29 +109,29 @@ makeDynamicLinker t callconv symMod = do
                 let handleField = (Name (mkOccName "libHandle") NameS, hdl)
                 mand <- [| mandatory |]
                 pick <- [| pick |]
-                modif <- [| modify |]
                 fm <- [| Data.Functor.fmap |]
-                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt mand pick modif fm sym) (zip3 ss optionals makes)
+                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt mand pick fm sym) (zip3 ss optionals makes)
                 return $ RecConE t (handleField:fds)
               ) 
         |]
+      sigType <- [t| FilePath -> [RTLDFlags] -> IO $(return $ ConT $ transformNameLocal id t) |]
       let load = FunD loadName [Clause [] (NormalB body) []]
-      return [load]
+      return [SigD loadName sigType,load]
 
       where
         symbols = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) ss
         loadName = transformNameLocal ("load" ++) t
 
     -- | Create a record field for a symbol
-    makeField :: Name -> Bool -> Exp -> Exp -> Exp -> Exp -> Name -> Q FieldExp
-    makeField mk isOptional mand pick modify fm name = do
+    makeField :: Name -> Bool -> Exp -> Exp -> Exp -> Name -> Q FieldExp
+    makeField mk isOptional mand pick fm name = do
       let literalize (Name occ _) = LitE $ StringL $ occString occ -- Get a string literal from a name
       let mandatory s a = AppE (AppE mand s) a -- Mandatory check call
 
       let litName = literalize name
       let op = if isOptional then id else mandatory litName
 
-      return (name, op $ AppE (AppE fm (VarE mk)) $ AppE pick $ AppE modify $ litName)
+      return (name, op $ AppE (AppE fm (VarE mk)) $ AppE pick $ AppE (VarE symMod) litName)
     
 
 
