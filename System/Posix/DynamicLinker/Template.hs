@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell, CPP #-}
 
 module System.Posix.DynamicLinker.Template (
-  makeDynamicLinker, Callconv(..)
+  makeDynamicLinker, Callconv(..), DL, FunPtr
   ) where
 
 import Language.Haskell.TH.Syntax

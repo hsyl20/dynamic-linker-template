@@ -5,11 +5,8 @@ module Test (
   ) where
 
 import System.Posix.DynamicLinker.Template
-import Language.Haskell.TH
 
-import Foreign.Ptr
 import Foreign.C.String
-import System.Posix.DynamicLinker.Prim
 
 data TestWorking = TestWorking {
   libHandle ::DL,
