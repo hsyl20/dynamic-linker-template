@@ -7,14 +7,14 @@ module System.Posix.DynamicLinker.Template (
 import Language.Haskell.TH.Syntax
 import Control.Monad (liftM, when, unless, liftM2)
 import Data.List (nub)
-import Data.Functor ( (<$>) )
+import Data.Functor ( (<$>), fmap )
 
 import System.Posix.DynamicLinker
 import Foreign.Ptr
 import Foreign.C.String
 import Data.Traversable(traverse)
 import Data.Map (fromList,lookup)
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isNothing, fromJust,Maybe)
 
 makeDynamicLinker :: Name -> Callconv -> Name -> Q [Dec]
 makeDynamicLinker t callconv symMod = do
@@ -34,18 +34,33 @@ makeDynamicLinker t callconv symMod = do
   -- Exclude "libHandle" from the symbol list
   let symbols = filter (\(Name name _,_,_) -> occString name /= "libHandle") cons
 
+  maybeType <- [t| Data.Maybe.Maybe |]
+  funptr <- [t| Foreign.Ptr.FunPtr |]
+
+  -- Get symbol names and optionality
+  let names = map (\ (n,_,_) -> n) symbols
+  let (optionals,realTypes) = unzip $ map (\(_,_,t) -> isMaybe maybeType t) symbols
+
+  -- Generate names for foreign import functions
+  makes <- mapM (\((Name occ _),_,_) -> newName $ "make_" ++ occString occ) symbols
+
   -- Generate foreign calls
-  foreigns <- mapM (\ (n,_,ftype) -> makeForeign n ftype) symbols
+  foreigns <- mapM (\ (n,t,mk) -> makeForeign funptr n t mk) (zip3 names realTypes makes)
   
   -- Show a warning if no foreign call has been generated
   when (null foreigns) $ qReport False (nodefmsg t)
 
   -- Generate loader
-  loader <- makeLoader name $ map (\ (n,_,_) -> n) symbols
+  loader <- makeLoader name names optionals makes
 
-  return (loader ++ foreigns)
+  return (foreigns ++ loader)
 
   where
+    -- | Indicate if a type is surrounded by Maybe and return real type
+    isMaybe :: Type -> Type -> (Bool,Type)
+    isMaybe maybeType (AppT mb t) | mb == maybeType = (True,t)
+    isMaybe _ t = (False,t)
+
     -- | Transform a name using the given function
     transformName :: (String -> String) -> Name -> Name
     transformName namer (Name occ f) = Name newName f
@@ -57,20 +72,14 @@ makeDynamicLinker t callconv symMod = do
       where
         Name occ _ = transformName namer n
         
-    -- | Name transformer for foreign functions
-    foreignNameTransformer :: Name -> Name
-    foreignNameTransformer = transformNameLocal ("make_" ++) 
-
     -- | Generate a foreign declaration
-    makeForeign :: Name -> Type -> Q Dec
-    makeForeign name typ = do
-      let n = foreignNameTransformer name
-      let fptr = mkName "Foreign.Ptr.FunPtr"
-      return . ForeignD $ ImportF callconv Safe "dynamic" n (AppT (AppT ArrowT (AppT (ConT fptr) typ)) typ)
+    makeForeign :: Type -> Name -> Type -> Name -> Q Dec
+    makeForeign fptr name typ mk = do
+      return . ForeignD $ ImportF callconv Safe "dynamic" mk (AppT (AppT ArrowT (AppT fptr typ)) typ)
 
     -- | Generate module loader function
-    makeLoader :: Name -> [Name] -> Q [Dec]
-    makeLoader t ss = do
+    makeLoader :: Name -> [Name] -> [Bool] -> [Name] -> Q [Dec]
+    makeLoader t ss optionals makes = do
       body <- [| \lib flags -> do
             -- Load the library
             dl <- dlopen lib flags
@@ -113,7 +122,8 @@ makeDynamicLinker t callconv symMod = do
                 mand <- [| mandatory |]
                 opt <- [| pick |]
                 modif <- [| modify |]
-                fds <- traverse (makeField True mand opt modif) ss
+                fm <- [| Data.Functor.fmap |]
+                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt mand opt modif fm sym) (zip3 ss optionals makes)
                 return $ RecConE t (handleField:fds)
               ) 
         |]
@@ -122,20 +132,18 @@ makeDynamicLinker t callconv symMod = do
 
       where
         symbols = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) ss
-        makes = map foreignNameTransformer ss
         loadName = transformNameLocal ("load" ++) t
 
     -- | Create a record field for a symbol
-    makeField :: Bool -> Exp -> Exp -> Exp -> Name -> Q FieldExp
-    makeField isMandatory mand opt modify name = do
+    makeField :: Name -> Bool -> Exp -> Exp -> Exp -> Exp -> Name -> Q FieldExp
+    makeField mk isOptional mand opt modify fm name = do
       let literalize (Name occ _) = LitE $ StringL $ occString occ -- Get a string literal from a name
-      let mk = AppE (VarE $ foreignNameTransformer name) -- Foreign function call
       let mandatory = AppE mand -- Mandatory check call
       let optional = AppE opt -- Optional check call
 
-      let op = if isMandatory then mandatory else optional
+      let (op1,op2) = if isOptional then (\f -> AppE (AppE fm f),optional)  else (AppE,mandatory)
 
-      return $ (name, mk $ op $ AppE modify $ literalize name)
+      return $ (name, op1 (VarE mk) $ op2 $ AppE modify $ literalize name)
     
 
 
