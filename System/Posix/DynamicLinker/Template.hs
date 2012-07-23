@@ -106,24 +106,18 @@ makeDynamicLinker t callconv symMod = do
             -- Modified symbol name -> Maybe (Ptr a)
             let pick a = fmap castFunPtr $ Data.Map.lookup a symPtrs
 
-            -- Modified symbol name -> Ptr a (may be null)
-            let unsafePick a = fromMaybe nullFunPtr $ pick a
-
-            -- Error displayed when a mandatory symbol is not found
-            let notFound a = error ("Mandatory symbol \"" ++ a ++ "\" not found in " ++ lib)
-
             -- Modified symbol name -> Ptr a, or error if symbol is not found
-            let mandatory a = if isNothing (pick a) then notFound a else unsafePick a
+            let mandatory s = fromMaybe $ error ("Mandatory symbol \"" ++ s ++ "\" not found in " ++ lib)
 
             -- Fill the structure
             return $( do
                 hdl <- [| dl |]
                 let handleField = (Name (mkOccName "libHandle") NameS, hdl)
                 mand <- [| mandatory |]
-                opt <- [| pick |]
+                pick <- [| pick |]
                 modif <- [| modify |]
                 fm <- [| Data.Functor.fmap |]
-                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt mand opt modif fm sym) (zip3 ss optionals makes)
+                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt mand pick modif fm sym) (zip3 ss optionals makes)
                 return $ RecConE t (handleField:fds)
               ) 
         |]
@@ -136,14 +130,14 @@ makeDynamicLinker t callconv symMod = do
 
     -- | Create a record field for a symbol
     makeField :: Name -> Bool -> Exp -> Exp -> Exp -> Exp -> Name -> Q FieldExp
-    makeField mk isOptional mand opt modify fm name = do
+    makeField mk isOptional mand pick modify fm name = do
       let literalize (Name occ _) = LitE $ StringL $ occString occ -- Get a string literal from a name
-      let mandatory = AppE mand -- Mandatory check call
-      let optional = AppE opt -- Optional check call
+      let mandatory s a = AppE (AppE mand s) a -- Mandatory check call
 
-      let (op1,op2) = if isOptional then (\f -> AppE (AppE fm f),optional)  else (AppE,mandatory)
+      let litName = literalize name
+      let op = if isOptional then id else mandatory litName
 
-      return $ (name, op1 (VarE mk) $ op2 $ AppE modify $ literalize name)
+      return (name, op $ AppE (AppE fm (VarE mk)) $ AppE pick $ AppE modify $ litName)
     
 
 
