@@ -5,7 +5,7 @@ name:                dynamic-linker-template
 version:             0.1.0.0
 synopsis:            Automatically derive dynamic linking methods from a data type. 
 -- description:         
-homepage:            	http://github.com/roconnor/dynamic-linker-template
+homepage:            http://github.com/hsyl20/dynamic-linker-template
 license:             BSD3
 license-file:        LICENSE
 author:              Sylvain HENRY

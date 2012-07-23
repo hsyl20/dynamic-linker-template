@@ -5,7 +5,7 @@ module System.Posix.DynamicLinker.Template (
   ) where
 
 import Language.Haskell.TH.Syntax
-import Control.Monad (liftM, when, unless, liftM2)
+import Control.Monad (liftM, when, unless, liftM2, void, join)
 import Data.List (nub)
 import Data.Functor ( (<$>), fmap )
 
@@ -40,6 +40,7 @@ makeDynamicLinker t callconv symMod = do
   -- Get symbol names and optionality
   let names = map (\ (n,_,_) -> n) symbols
   let (optionals,realTypes) = unzip $ map (\(_,_,t) -> isMaybe maybeType t) symbols
+  let symbolsE = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) names
 
   -- Generate names for foreign import functions
   makes <- mapM (\((Name occ _),_,_) -> newName $ "make_" ++ occString occ) symbols
@@ -51,7 +52,7 @@ makeDynamicLinker t callconv symMod = do
   when (null foreigns) $ qReport False (nodefmsg t)
 
   -- Generate loader
-  loader <- makeLoader name names optionals makes
+  loader <- makeLoader name names optionals makes symbolsE
 
   return (foreigns ++ loader)
 
@@ -60,6 +61,8 @@ makeDynamicLinker t callconv symMod = do
     isMaybe :: Type -> Type -> (Bool,Type)
     isMaybe maybeType (AppT mb t) | mb == maybeType = (True,t)
     isMaybe _ t = (False,t)
+
+    loadName = transformNameLocal ("load" ++) t
 
     -- | Transform a name using the given function
     transformName :: (String -> String) -> Name -> Name
@@ -78,14 +81,14 @@ makeDynamicLinker t callconv symMod = do
       return . ForeignD $ ImportF callconv Safe "dynamic" mk (AppT (AppT ArrowT (AppT fptr typ)) typ)
 
     -- | Generate module loader function
-    makeLoader :: Name -> [Name] -> [Bool] -> [Name] -> Q [Dec]
-    makeLoader t ss optionals makes = do
+    makeLoader :: Name -> [Name] -> [Bool] -> [Name] -> Exp -> Q [Dec]
+    makeLoader t names optionals makes symbolsE = do
       body <- [| \lib flags -> do
             -- Load the library
             dl <- dlopen lib flags
 
             -- Symbol list
-            let symbls = $(return symbols)
+            let symbls = $(return symbolsE)
 
             -- Transform symbol names
             let modSymbols = fmap $(return $ VarE symMod) symbls
@@ -97,20 +100,22 @@ makeDynamicLinker t callconv symMod = do
             -- Associative Map: Modified symbol name -> Ptr () (may be null)
             let symPtrs = fromList $ modSymbols `zip` ptrs
 
-            -- Modified symbol name -> Maybe (Ptr a)
-            let pick a = fmap castFunPtr $ Data.Map.lookup a symPtrs
+            let fromFunPtr a = if a == nullFunPtr then Nothing else Just a
 
-            -- Modified symbol name -> Ptr a, or error if symbol is not found
-            let mandatory s = fromMaybe $ error ("Mandatory symbol \"" ++ s ++ "\" not found in " ++ lib)
+            -- Modified symbol name -> Maybe (Ptr a) 
+            let pick a = join $ fmap (fromFunPtr . castFunPtr) $ Data.Map.lookup a symPtrs
+
+            void $ traverse (\(name,opt) -> do
+                when (not opt && isNothing (pick name)) $ error ("Mandatory symbol \"" ++ name ++ "\" was not found in " ++ lib)
+              ) (zip modSymbols $(lift $ optionals))
 
             -- Fill the structure
             return $( do
                 hdl <- [| dl |]
                 let handleField = (Name (mkOccName "libHandle") NameS, hdl)
-                mand <- [| mandatory |]
                 pick <- [| pick |]
                 fm <- [| Data.Functor.fmap |]
-                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt mand pick fm sym) (zip3 ss optionals makes)
+                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt pick fm sym) (zip3 names optionals makes)
                 return $ RecConE t (handleField:fds)
               ) 
         |]
@@ -118,21 +123,14 @@ makeDynamicLinker t callconv symMod = do
       let load = FunD loadName [Clause [] (NormalB body) []]
       return [SigD loadName sigType,load]
 
-      where
-        symbols = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) ss
-        loadName = transformNameLocal ("load" ++) t
+    literalize (Name occ _) = LitE $ StringL $ occString occ -- Get a string literal from a name
 
     -- | Create a record field for a symbol
-    makeField :: Name -> Bool -> Exp -> Exp -> Exp -> Name -> Q FieldExp
-    makeField mk isOptional mand pick fm name = do
-      let literalize (Name occ _) = LitE $ StringL $ occString occ -- Get a string literal from a name
-      let mandatory s a = AppE (AppE mand s) a -- Mandatory check call
+    makeField :: Name -> Bool -> Exp -> Exp -> Name -> Q FieldExp
+    makeField mk isOptional pick fm name = do
+      op <- if isOptional then [| id |] else [| fromJust |]
 
-      let litName = literalize name
-      let op = if isOptional then id else mandatory litName
-
-      return (name, op $ AppE (AppE fm (VarE mk)) $ AppE pick $ AppE (VarE symMod) litName)
-    
+      return (name, AppE op $ AppE (AppE fm (VarE mk)) $ AppE pick $ AppE (VarE symMod) $ literalize name)
 
 
     nodefmsg t = "Warning: No dynamic linker method generated from the name " ++ show t

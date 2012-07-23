@@ -16,7 +16,7 @@ data TestWorking = TestWorking {
   thing4 :: Maybe (Float -> IO Double)
 }
 
-myModifier :: Maybe (String -> String)
-myModifier = Just(++ "_v2")
+myModifier :: String -> String
+myModifier = (++ "_v2")
 
 $(makeDynamicLinker ''TestWorking CCall 'myModifier)
