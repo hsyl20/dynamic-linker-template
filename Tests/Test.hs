@@ -1,22 +1,19 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, ForeignFunctionInterface #-}
 
-module Test (
-  loadTestWorking
-  ) where
+module Test (loadMyLib, MyLib(..)) where
 
 import System.Posix.DynamicLinker.Template
 
-import Foreign.C.String
-
-data TestWorking = TestWorking {
+data MyLib = MyLib {
   libHandle ::DL,
-  thing1 :: CString -> IO Int,
-  thing2 :: Maybe (Int -> Int -> Int),
-  thing3 :: Float -> Int,
-  thing4 :: Maybe (Float -> IO Double)
+  thing1 :: Double -> IO Int,          -- Mandatory symbol
+  thing2 :: Maybe (Int -> Int -> Int)  -- Optional symbol
 }
 
 myModifier :: String -> String
 myModifier = (++ "_v2")
 
-$(makeDynamicLinker ''TestWorking CCall 'myModifier)
+$(makeDynamicLinker ''MyLib CCall 'myModifier)
+
+-- Load your library with:
+-- loadMyLib :: FilePath -> [RTLDFlags] -> IO MyLib

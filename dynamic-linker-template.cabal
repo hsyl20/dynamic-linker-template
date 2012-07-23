@@ -4,7 +4,18 @@
 name:                dynamic-linker-template
 version:             0.1.0.0
 synopsis:            Automatically derive dynamic linking methods from a data type. 
--- description:         
+description:
+  This package uses Template Haskell to generate dynamic linking FFI methods from a
+  data by using its field names. A load function is generated to create an instance
+  of the data from a library path.
+  .
+  Optional symbols are supported (use Maybe types in the data structure).
+  .
+  A String->String method can be provided to deal with symbols whose names are not
+  exactly the same as field names.
+  .
+  See <https://github.com/hsyl20/dynamic-linker-template/blob/master/Tests/Test.hs> for an example.
+
 homepage:            http://github.com/hsyl20/dynamic-linker-template
 license:             BSD3
 license-file:        LICENSE
@@ -23,3 +34,7 @@ library
     template-haskell ==2.7.*,
     unix ==2.5.*,
     containers ==0.4.*
+
+source-repository head
+  type:     git
+  location: git://github.com/hsyl20/dynamic-linker-template.git
