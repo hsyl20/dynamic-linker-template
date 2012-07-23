@@ -16,7 +16,11 @@ import Data.Traversable(traverse)
 import Data.Map (fromList,lookup)
 import Data.Maybe (fromMaybe, isNothing, fromJust,Maybe)
 
-makeDynamicLinker :: Name -> Callconv -> Name -> Q [Dec]
+-- | Generate dynamic linking FFI methods for each field in the first parameter
+makeDynamicLinker :: Name -- ^ Name of the data type
+  -> Callconv             -- ^ Calling convention: CCall or StdCall
+  -> Name                 -- ^ Name of the function used to transform symbol names
+  -> Q [Dec]
 makeDynamicLinker t callconv symMod = do
   info <- reify t
   reified <- case info of
