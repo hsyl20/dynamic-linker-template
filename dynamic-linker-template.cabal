@@ -2,7 +2,7 @@
 -- further documentation, see http://haskell.org/cabal/users-guide/
 
 name:                dynamic-linker-template
-version:             0.1.0.2
+version:             0.1.0.3
 synopsis:            Automatically derive dynamic linking methods from a data type. 
 description:
   This package uses Template Haskell to generate dynamic linking FFI methods from a
@@ -33,7 +33,7 @@ library
     base ==4.6.*,
     template-haskell ==2.8.*,
     unix ==2.6.*,
-    containers ==0.5.*
+    containers ==0.5.0.*
 
 source-repository head
   type:     git
