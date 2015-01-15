@@ -113,14 +113,13 @@ makeDynamicLinker t callconv symMod = do
             -- Associative Map: Modified symbol name -> Ptr () (may be null)
             let symPtrs = fromList $ modSymbols `zip` ptrs
 
-
-            -- Modified symbol name -> Maybe (Ptr a) 
             let 
                fromFunPtr a = if a == nullFunPtr then Nothing else Just a
                pick a = join $ fmap (fromFunPtr . castFunPtr) $ Data.Map.lookup a symPtrs
                missingmsg name lib = "Mandatory symbol \"" ++ name ++ "\" was not found in " ++ lib
                checkSym (name,opt) = when (not opt && isNothing (pick name)) $ error (missingmsg name lib)
 
+            -- Check that the mandatory symbols are present
             traverse_ checkSym (zip modSymbols $(lift $ optionals))
 
             -- Fill the structure
@@ -150,7 +149,6 @@ makeDynamicLinker t callconv symMod = do
       op <- if isOptional then [| id |] else [| fromJust |]
 
       return (name, AppE op . AppE (AppE fm (VarE mk)) . AppE pick . AppE (VarE symMod) $ literalize name)
-
 
     nodefmsg t = "Warning: No dynamic linker method generated from the name " ++ show t
 
