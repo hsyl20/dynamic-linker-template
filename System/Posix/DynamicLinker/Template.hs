@@ -26,40 +26,43 @@ makeDynamicLinker :: Name -- ^ Name of the data type
   -> Callconv             -- ^ Calling convention: CCall or StdCall
   -> Name                 -- ^ Name of the function used to transform symbol names
   -> Q [Dec]
-makeDynamicLinker t callconv symMod = do
-  info <- reify t
+makeDynamicLinker dt callconv symMod = do
+
+  -- reify and check that the name refers to a data type
+  info <- reify dt
   reified <- case info of
      TyConI dec -> return dec
-     _ -> fail $ errmsg t
+     _          -> fail $ errmsg dt
 
+  -- check that there is a single constructor
   (name,cons) <- case reified of
-     DataD [] _ [] [RecC name cons'] _ -> return (name,cons')
-     NewtypeD [] _ [] (RecC name cons') _ -> return (name,cons')
-     _ -> fail $ errmsg t
+     DataD [] _ [] _ [RecC name cons'] _    -> return (name,cons')
+     NewtypeD [] _ [] _ (RecC name cons') _ -> return (name,cons')
+     _                                      -> fail $ errmsg dt
 
   -- Check for a field named "libHandle"
   unless (any ((==) "libHandle" . extractName) cons) $
-     qReport True (nolibhandlemsg t)
+     qReport True (nolibhandlemsg dt)
 
   -- Exclude "libHandle" from the symbol list
   let symbols = filter ((/=) "libHandle" . extractName) cons
 
   maybeType <- [t| Data.Maybe.Maybe |]
-  funptr <- [t| Foreign.Ptr.FunPtr |]
+  funptr    <- [t| Foreign.Ptr.FunPtr |]
 
   -- Get symbol names and optionality
-  let names = map (\ (n,_,_) -> n) symbols
+  let names                 = map (\ (n,_,_) -> n) symbols
   let (optionals,realTypes) = unzip $ map (\(_,_,t) -> isMaybe maybeType t) symbols
-  let symbolsE = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) names
+  let symbolsE              = ListE $ map (\ (Name occ _) -> LitE $ StringL $ occString occ) names
 
   -- Generate names for foreign import functions
   makes <- mapM (newName . ("make_" ++) . extractName) symbols
 
   -- Generate foreign calls
-  foreigns <- mapM (\ (n,t,mk) -> makeForeign funptr n t mk) (zip3 names realTypes makes)
+  foreigns <- mapM (\(t,mk) -> makeForeign funptr t mk) (realTypes `zip` makes)
   
   -- Show a warning if no foreign call has been generated
-  when (null foreigns) $ qReport False (nodefmsg t)
+  when (null foreigns) $ qReport False (nodefmsg dt)
 
   -- Generate loader
   loader <- makeLoader name names optionals makes symbolsE
@@ -72,7 +75,7 @@ makeDynamicLinker t callconv symMod = do
     isMaybe maybeType (AppT mb t) | mb == maybeType = (True,t)
     isMaybe _ t = (False,t)
 
-    loadName = transformNameLocal ("load" ++) t
+    loadName = transformNameLocal ("load" ++) dt
 
     extractName (Name name _, _, _) = occString name
 
@@ -88,8 +91,8 @@ makeDynamicLinker t callconv symMod = do
         Name occ _ = transformName namer n
         
     -- | Generate a foreign declaration
-    makeForeign :: Type -> Name -> Type -> Name -> Q Dec
-    makeForeign fptr name typ mk = do
+    makeForeign :: Type -> Type -> Name -> Q Dec
+    makeForeign fptr typ mk = do
       let importTyp = AppT (AppT ArrowT (AppT fptr typ)) typ
       return (ForeignD (ImportF callconv Safe "dynamic" mk importTyp))
 
@@ -116,7 +119,7 @@ makeDynamicLinker t callconv symMod = do
             let 
                fromFunPtr a = if a == nullFunPtr then Nothing else Just a
                pick a = join $ fmap (fromFunPtr . castFunPtr) $ Data.Map.lookup a symPtrs
-               missingmsg name lib = "Mandatory symbol \"" ++ name ++ "\" was not found in " ++ lib
+               missingmsg name lib' = "Mandatory symbol \"" ++ name ++ "\" was not found in " ++ lib'
                checkSym (name,opt) = when (not opt && isNothing (pick name)) $ error (missingmsg name lib)
 
             -- Check that the mandatory symbols are present
@@ -126,9 +129,9 @@ makeDynamicLinker t callconv symMod = do
             return $( do
                 hdl <- [| dl |]
                 let handleField = (Name (mkOccName "libHandle") NameS, hdl)
-                pick <- [| pick |]
+                pick' <- [| pick |]
                 fm <- [| Data.Functor.fmap |]
-                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt pick fm sym) (zip3 names optionals makes)
+                fds <- traverse (\(sym,isOpt,mk) -> makeField mk isOpt pick' fm sym) (zip3 names optionals makes)
                 return $ RecConE t (handleField:fds)
               ) 
         |]
@@ -156,6 +159,7 @@ makeDynamicLinker t callconv symMod = do
 
     errmsg t = "Cannot derive dynamic linker methods for name " ++ show t ++ " because"
            ++ "\n it is not a type declared with 'data' or 'newtype'"
+           ++ "\n or because it has more than one constructor"
            ++ "\n Did you remember to double-tick the type as in"
            ++ "\n $(makeDynamicLinker ''TheType)?"
 

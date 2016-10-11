@@ -1,5 +1,5 @@
 name:                dynamic-linker-template
-version:             0.1.0.4
+version:             0.1.1.0
 synopsis:            Automatically derive dynamic linking methods from a data type. 
 description:
   This package uses Template Haskell to generate dynamic linking FFI methods from a
